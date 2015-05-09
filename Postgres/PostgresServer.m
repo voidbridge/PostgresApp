@@ -163,6 +163,15 @@ static NSString * PGNormalizedVersionStringFromString(NSString *version) {
 				if (completionBlock) dispatch_async(dispatch_get_main_queue(), ^{ completionBlock(NO, error); });
 				return;
 			}
+            
+            NSArray *pgqdIni = @[@"[pgqd]\nlogfile = ", [_varPath stringByAppendingPathComponent:@"pgqd.log"], @"\npidfile = ", [_varPath stringByAppendingPathComponent:@"pgqd.pid"]];
+            BOOL pgqdIniWritten = [[pgqdIni componentsJoinedByString:@""] writeToFile:[_varPath stringByAppendingPathComponent:@"pgqd.ini"] atomically:YES
+                                                                             encoding:NSUTF8StringEncoding error:&error];
+            if (!pgqdIniWritten)
+            {
+                if (completionBlock) dispatch_async(dispatch_get_main_queue(), ^{ completionBlock(NO, error); });
+                return;
+            }
 			
 			BOOL serverDidStart = [self startServerWithError:&error];
 			if (!serverDidStart) {
@@ -257,11 +266,33 @@ static NSString * PGNormalizedVersionStringFromString(NSString *version) {
 		*error = [NSError errorWithDomain:@"com.postgresapp.Postgres.pg_ctl" code:controlTask.terminationStatus userInfo:errorUserInfo];
 	}
 
-	if (controlTask.terminationStatus == 0) {
+    BOOL success = controlTask.terminationStatus == 0;
+	if (success) {
 		self.isRunning = YES;
+        
+        NSTask *pgqdControlTask = [[NSTask alloc] init];
+        pgqdControlTask.launchPath = [self.binPath stringByAppendingPathComponent:@"pgqd"];
+        pgqdControlTask.arguments = @[@"-q", @"-d", [self.varPath stringByAppendingPathComponent:@"pgqd.ini"]];
+        pgqdControlTask.standardError = [[NSPipe alloc] init];
+        [pgqdControlTask launch];
+        NSString *pgqdControlTaskError = [[NSString alloc] initWithData:[[pgqdControlTask.standardError fileHandleForReading] readDataToEndOfFile] encoding:NSUTF8StringEncoding];
+        [pgqdControlTask waitUntilExit];
+        
+        if (pgqdControlTask.terminationStatus != 0 && error) {
+            NSMutableDictionary *errorUserInfo = [[NSMutableDictionary alloc] init];
+            errorUserInfo[NSLocalizedDescriptionKey] = NSLocalizedString(@"Could not start PGQd.",nil);
+            errorUserInfo[NSLocalizedRecoverySuggestionErrorKey] = pgqdControlTaskError;
+            errorUserInfo[NSLocalizedRecoveryOptionsErrorKey] = @[@"OK", @"Open PGQd Log"];
+            errorUserInfo[NSRecoveryAttempterErrorKey] = [[RecoveryAttempter alloc] init];
+            errorUserInfo[@"ServerLogRecoveryOptionIndex"] = @1;
+            errorUserInfo[@"ServerLogPath"] = [self.varPath stringByAppendingPathComponent:@"pgqd.log"];
+            *error = [NSError errorWithDomain:@"com.postgresapp.Postgres.pgqd" code:pgqdControlTask.terminationStatus userInfo:errorUserInfo];
+        }
+        
+        success = pgqdControlTask.terminationStatus == 0;
 	}
 	
-	return controlTask.terminationStatus == 0;
+	return success;
 }
 
 -(BOOL)stopServerWithError:(NSError**)error {
@@ -293,7 +324,26 @@ static NSString * PGNormalizedVersionStringFromString(NSString *version) {
 		self.isRunning = NO;
 	}
 	
-	return controlTask.terminationStatus == 0;
+    NSTask *pgqdControlTask = [[NSTask alloc] init];
+    pgqdControlTask.launchPath = [self.binPath stringByAppendingPathComponent:@"pgqd"];
+    pgqdControlTask.arguments = @[@"-q", @"-s", [self.varPath stringByAppendingPathComponent:@"pgqd.ini"]];
+    pgqdControlTask.standardError = [[NSPipe alloc] init];
+    [pgqdControlTask launch];
+    NSString *pgqdControlTaskError = [[NSString alloc] initWithData:[[pgqdControlTask.standardError fileHandleForReading] readDataToEndOfFile] encoding:NSUTF8StringEncoding];
+    [pgqdControlTask waitUntilExit];
+    
+    if (pgqdControlTask.terminationStatus != 0 && error) {
+        NSMutableDictionary *errorUserInfo = [[NSMutableDictionary alloc] init];
+        errorUserInfo[NSLocalizedDescriptionKey] = NSLocalizedString(@"Could not stop PGQd.",nil);
+        errorUserInfo[NSLocalizedRecoverySuggestionErrorKey] = pgqdControlTaskError;
+        errorUserInfo[NSLocalizedRecoveryOptionsErrorKey] = @[@"OK", @"Open PGQd Log"];
+        errorUserInfo[NSRecoveryAttempterErrorKey] = [[RecoveryAttempter alloc] init];
+        errorUserInfo[@"ServerLogRecoveryOptionIndex"] = @1;
+        errorUserInfo[@"ServerLogPath"] = [self.varPath stringByAppendingPathComponent:@"pgqd.log"];
+        *error = [NSError errorWithDomain:@"com.postgresapp.Postgres.pgqd" code:pgqdControlTask.terminationStatus userInfo:errorUserInfo];
+    }
+
+	return controlTask.terminationStatus == 0 && pgqdControlTask.terminationStatus == 0;
 }
 
 -(BOOL)initDatabaseWithError:(NSError**)error {
