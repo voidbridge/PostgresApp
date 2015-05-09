@@ -14,6 +14,7 @@ PROJ_VERSION=4.9.1
 DATUMGRID_VERSION=1.5
 #see http://omahaproxy.appspot.com for latest stable v8 version
 V8_VERSION=3.18
+SKYTOOLS_VERSION=3.2.6
 JSONC_VERSION=0.11
 LIBTIFF_VERSION=4.0.3
 ICU_MAJOR_VERSION=54
@@ -24,9 +25,9 @@ PREFIX=/Applications/Postgres.app/Contents/Versions/$(POSTGRES_MAJOR_VERSION)
 PATH=$(PREFIX)/bin:/bin:/usr/bin:/opt/local/bin
 
 #compiler options
-MACOSX_DEPLOYMENT_TARGET=10.7
-CFLAGS:=$(CFLAGS) -mmacosx-version-min=10.7
-CXXFLAGS:=$(CFLAGS) -mmacosx-version-min=10.7
+MACOSX_DEPLOYMENT_TARGET=10.9
+CFLAGS:=$(CFLAGS) -mmacosx-version-min=10.9
+CXXFLAGS:=$(CFLAGS) -mmacosx-version-min=10.9
 
 export CFLAGS CXXFLAGS MACOSX_DEPLOYMENT_TARGET
 
@@ -34,8 +35,8 @@ export CFLAGS CXXFLAGS MACOSX_DEPLOYMENT_TARGET
 CURL=/usr/bin/curl -L10 --silent --show-error --remote-name
 TAR=/usr/bin/tar xzf
 
-all: postgresql postgis plv8
-clean: clean-postgresql clean-openssl clean-libxml2 clean-libgdal clean-libproj clean-postgis clean-plv8 clean-libjpeg clean-libjasper clean-libgeos clean-libtiff clean-json-c
+all: postgresql postgis plv8 skytools
+clean: clean-postgresql clean-openssl clean-libxml2 clean-libgdal clean-libproj clean-postgis clean-plv8 clean-libjpeg clean-libjasper clean-libgeos clean-libtiff clean-json-c clean-skytools
 
 #########################
 ###### PostgreSQL #######
@@ -378,3 +379,32 @@ v8-${V8_VERSION}/Makefile:
 
 clean-plv8:
 	rm -Rf plv8js v8-${V8_VERSION}
+
+#########################
+####### SkyTools ########
+#########################
+
+skytools: $(PREFIX)/bin/londiste3
+
+$(PREFIX)/bin/londiste3: skytools-${SKYTOOLS_VERSION}/Makefile
+	make -C skytools-${SKYTOOLS_VERSION}
+	make -C skytools-${SKYTOOLS_VERSION} install
+	touch $@
+
+skytools-${SKYTOOLS_VERSION}/Makefile: skytools-${SKYTOOLS_VERSION}/configure
+	cd skytools-${SKYTOOLS_VERSION} && ./configure --prefix="$(PREFIX)" --with-pgconfig="$(PREFIX)/bin/pg_config"
+	touch $@
+
+skytools-${SKYTOOLS_VERSION}/configure: skytools-${SKYTOOLS_VERSION}/autogen.sh
+	cd skytools-${SKYTOOLS_VERSION} && ./autogen.sh
+	touch $@
+
+skytools-${SKYTOOLS_VERSION}/autogen.sh:
+	/usr/bin/git clone -q "https://github.com/markokr/skytools.git" skytools-${SKYTOOLS_VERSION}
+	cd skytools-${SKYTOOLS_VERSION} && /usr/bin/git checkout -q "tags/${SKYTOOLS_VERSION}"
+	cd skytools-${SKYTOOLS_VERSION} && /usr/bin/git submodule -q init
+	cd skytools-${SKYTOOLS_VERSION} && /usr/bin/git submodule -q update
+	touch $@
+	
+clean-skytools:
+	rm -Rf "skytools-$(SKYTOOLS_VERSION)"
