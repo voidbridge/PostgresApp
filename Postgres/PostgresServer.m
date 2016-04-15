@@ -49,7 +49,6 @@ static NSString * PGNormalizedVersionStringFromString(NSString *version) {
 
 @interface PostgresServer()
 @property BOOL isRunning;
-@property NSUInteger port;
 @end
 
 @implementation PostgresServer
@@ -58,7 +57,11 @@ static NSString * PGNormalizedVersionStringFromString(NSString *version) {
 	return [[[NSFileManager defaultManager] applicationSupportDirectory] stringByAppendingFormat:@"/var-%s", xstr(PG_MAJOR_VERSION)];
 }
 
-+(PostgresDataDirectoryStatus)statusOfDataDirectory:(NSString*)dir {
++(NSString*)standardBinaryDirectory {
+	return [[NSBundle mainBundle].bundlePath stringByAppendingFormat:@"/Contents/Versions/%s/bin",xstr(PG_MAJOR_VERSION)];
+}
+
++(PostgresDataDirectoryStatus)statusOfDataDirectory:(NSString*)dir error:(NSError**)outError {
 	NSString *versionFilePath = [dir stringByAppendingPathComponent:@"PG_VERSION"];
 	if (![[NSFileManager defaultManager] fileExistsAtPath:versionFilePath]) {
 		return PostgresDataDirectoryEmpty;
@@ -69,6 +72,13 @@ static NSString * PGNormalizedVersionStringFromString(NSString *version) {
 
 	if ([includedVersion isEqual:dataDirectoryVersion]) {
 		return PostgresDataDirectoryCompatible;
+	}
+	
+	if (outError) {
+		NSMutableDictionary *userInfo = [[NSMutableDictionary alloc] initWithCapacity:2];
+		userInfo[NSLocalizedDescriptionKey] = @"Incompatible Data Directory";
+		if (dataDirectoryVersion) userInfo[NSLocalizedRecoverySuggestionErrorKey] = [NSString stringWithFormat:@"The data directory was created with PostgreSQL %@. This version of Postgres.app can only open %@ data directories. Please download a different version of Postgres.app, or choose a different data directory.", dataDirectoryVersion, includedVersion];
+		*outError = [NSError errorWithDomain:@"com.postgresapp.Postgres" code:1 userInfo:userInfo];
 	}
 	
 	return PostgresDataDirectoryIncompatible;
@@ -89,7 +99,7 @@ static NSString * PGNormalizedVersionStringFromString(NSString *version) {
 	for (NSString *applicationSupportDirectory in applicationSupportDirectories) {
 		for (NSString *dataDirName in dataDirNames) {
 			NSString *dataDirectoryPath = [applicationSupportDirectory stringByAppendingPathComponent:dataDirName];
-			PostgresDataDirectoryStatus status = [self statusOfDataDirectory:dataDirectoryPath];
+			PostgresDataDirectoryStatus status = [self statusOfDataDirectory:dataDirectoryPath error:nil];
 			if (status == PostgresDataDirectoryCompatible) {
 				return dataDirectoryPath;
 			}
@@ -104,20 +114,17 @@ static NSString * PGNormalizedVersionStringFromString(NSString *version) {
 
 +(PostgresServer *)defaultServer {
     static PostgresServer *_sharedServer = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-		NSString *binDirectory = [[NSBundle mainBundle].bundlePath stringByAppendingFormat:@"/Contents/Versions/%s/bin",xstr(PG_MAJOR_VERSION)];
+	if (!_sharedServer) {
 		NSString *databaseDirectory = [[NSUserDefaults standardUserDefaults] stringForKey:[PostgresServer dataDirectoryPreferenceKey]];
-		if (!databaseDirectory || [self statusOfDataDirectory:databaseDirectory] == PostgresDataDirectoryIncompatible) {
+		if (!databaseDirectory) {
 			databaseDirectory = [self existingDatabaseDirectory];
 		}
 		if (!databaseDirectory) {
 			databaseDirectory = [self standardDatabaseDirectory];
 		}
 		[[NSUserDefaults standardUserDefaults] setObject:databaseDirectory forKey:[PostgresServer dataDirectoryPreferenceKey]];
-        _sharedServer = [[PostgresServer alloc] initWithExecutablesDirectory:binDirectory databaseDirectory:databaseDirectory];
-    });
-    
+        _sharedServer = [[PostgresServer alloc] initWithExecutablesDirectory:[self standardBinaryDirectory] databaseDirectory:databaseDirectory];
+    }
     return _sharedServer;
 }
 
@@ -155,7 +162,7 @@ static NSString * PGNormalizedVersionStringFromString(NSString *version) {
 {
 	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
 		NSError *error = nil;
-		PostgresDataDirectoryStatus dataDirStatus = [PostgresServer statusOfDataDirectory:_varPath];
+		PostgresDataDirectoryStatus dataDirStatus = [PostgresServer statusOfDataDirectory:_varPath error:&error];
 		
 		if (dataDirStatus==PostgresDataDirectoryEmpty) {
 			BOOL serverDidInit = [self initDatabaseWithError:&error];
@@ -170,6 +177,12 @@ static NSString * PGNormalizedVersionStringFromString(NSString *version) {
 				return;
 			}
 			
+			BOOL createdUser = [self createUserWithError:&error];
+			if (!createdUser) {
+				if (completionBlock) dispatch_async(dispatch_get_main_queue(), ^{ completionBlock(NO, error); });
+				return;
+			}
+			
 			BOOL createdUserDatabase = [self createUserDatabaseWithError:&error];
 			if (completionBlock) dispatch_async(dispatch_get_main_queue(), ^{ completionBlock(createdUserDatabase, error); });
 		}
@@ -178,7 +191,7 @@ static NSString * PGNormalizedVersionStringFromString(NSString *version) {
 			if (completionBlock) dispatch_async(dispatch_get_main_queue(), ^{ completionBlock(serverDidStart, error); });
 		}
 		else {
-			if (completionBlock) dispatch_async(dispatch_get_main_queue(), ^{ completionBlock(NO, nil); });
+			if (completionBlock) dispatch_async(dispatch_get_main_queue(), ^{ completionBlock(NO, error); });
 		}
 		
 	});
@@ -239,7 +252,8 @@ static NSString * PGNormalizedVersionStringFromString(NSString *version) {
 		/* control command          */ @"start",
 		/* data directory           */ @"-D", self.varPath,
 		/* wait for server to start */ @"-w",
-		/* server log file          */ @"-l", self.logfilePath
+		/* server log file          */ @"-l", self.logfilePath,
+		/* allow overriding port    */ @"-o", [NSString stringWithFormat:@"-p %lu", self.port]
 	];
 	controlTask.standardError = [[NSPipe alloc] init];
 	[controlTask launch];
@@ -301,7 +315,8 @@ static NSString * PGNormalizedVersionStringFromString(NSString *version) {
 	initdbTask.launchPath = [self.binPath stringByAppendingPathComponent:@"initdb"];
 	initdbTask.arguments = @[
 		/* data directory */ @"-D", self.varPath,
-		/* encoding       */ @"-EUTF-8",
+		/* superuser name */ @"-U", @"postgres",
+		/* encoding       */ @"--encoding=UTF-8",
 		/* locale         */ @"--locale=en_US.UTF-8"
 	];
 	initdbTask.standardError = [[NSPipe alloc] init];
@@ -317,6 +332,34 @@ static NSString * PGNormalizedVersionStringFromString(NSString *version) {
 	}
 	
 	return initdbTask.terminationStatus == 0;
+}
+
+-(BOOL)createUserWithError:(NSError**)error {
+	NSTask *task = [[NSTask alloc] init];
+	task.launchPath = [self.binPath stringByAppendingPathComponent:@"createuser"];
+	task.arguments = @[
+					   @"-U", @"postgres",
+					   @"-p", @(self.port).stringValue,
+					   @"--superuser",
+					   NSUserName()
+	];
+	task.standardError = [[NSPipe alloc] init];
+	[task launch];
+	NSString *taskError = [[NSString alloc] initWithData:[[task.standardError fileHandleForReading] readDataToEndOfFile] encoding:NSUTF8StringEncoding];
+	[task waitUntilExit];
+	
+	if (task.terminationStatus != 0 && error) {
+		NSMutableDictionary *errorUserInfo = [[NSMutableDictionary alloc] init];
+		errorUserInfo[NSLocalizedDescriptionKey] = NSLocalizedString(@"Could not create default user.",nil);
+		errorUserInfo[NSLocalizedRecoverySuggestionErrorKey] = taskError;
+		errorUserInfo[NSLocalizedRecoveryOptionsErrorKey] = @[@"OK", @"Open Server Log"];
+		errorUserInfo[NSRecoveryAttempterErrorKey] = [[RecoveryAttempter alloc] init];
+		errorUserInfo[@"ServerLogRecoveryOptionIndex"] = @1;
+		errorUserInfo[@"ServerLogPath"] = self.logfilePath;
+		*error = [NSError errorWithDomain:@"com.postgresapp.Postgres.createuser" code:task.terminationStatus userInfo:errorUserInfo];
+	}
+	
+	return task.terminationStatus == 0;
 }
 
 -(BOOL)createUserDatabaseWithError:(NSError**)error {

@@ -1,21 +1,22 @@
 # VERSION numbers
-POSTGIS_VERSION=2.1.7
-POSTGIS_MAJOR_VERSION=2.1
-POSTGRES_VERSION=9.4.1
-POSTGRES_MAJOR_VERSION=9.4
-GDAL_VERSION=1.11.2
-GEOS_VERSION=3.4.2
+POSTGIS_VERSION=2.2.1
+POSTGIS_MAJOR_VERSION=2.2
+POSTGRES_VERSION=9.5.1
+POSTGRES_MAJOR_VERSION=9.5
+GDAL_VERSION=1.11.3
+GEOS_VERSION=3.5.0
 JPEG_VERSION=8d
 LIBEDIT_VERSION=20130611-3.1
 LIBJASPER_VERSION=1.900.1
 LIBXML2_VERSION=2.9.2
-OPENSSL_VERSION=1.0.1m
-PROJ_VERSION=4.9.1
+OPENSSL_VERSION=1.0.1r
+PROJ_VERSION=4.9.2
 DATUMGRID_VERSION=1.5
 #see http://omahaproxy.appspot.com for latest stable v8 version
 V8_VERSION=3.18
+PLV8_VERSION=1.4.4
 JSONC_VERSION=0.11
-LIBTIFF_VERSION=4.0.3
+LIBTIFF_VERSION=4.0.6
 ICU_MAJOR_VERSION=54
 ICU_MINOR_VERSION=1
 
@@ -306,7 +307,7 @@ tiff-$(LIBTIFF_VERSION)/configure: tiff-$(LIBTIFF_VERSION).tar.gz
 	touch $@
 
 tiff-$(LIBTIFF_VERSION).tar.gz:
-	$(CURL) ftp://ftp.remotesensing.org/pub/libtiff/tiff-4.0.3.tar.gz
+	$(CURL) ftp://ftp.remotesensing.org/pub/libtiff/tiff-$(LIBTIFF_VERSION).tar.gz
 
 clean-libtiff:
 	rm -Rf tiff-$(LIBTIFF_VERSION)
@@ -349,14 +350,17 @@ clean-postgis:
 
 plv8: $(PREFIX)/lib/postgresql/plv8.so
 
-$(PREFIX)/lib/postgresql/plv8.so: plv8js/Makefile $(PREFIX)/lib/libv8.dylib
-	export PGHOME="$(PREFIX)"; export CC=clang; export CXX=clang++; export V8_SRCDIR="$(CURDIR)/v8-${V8_VERSION}"; make -C plv8js install 
+$(PREFIX)/lib/postgresql/plv8.so: plv8-${PLV8_VERSION}/Makefile $(PREFIX)/lib/libv8.dylib
+	export PGHOME="$(PREFIX)"; export CC=clang; export CXX=clang++; export V8_SRCDIR="$(CURDIR)/v8-${V8_VERSION}"; make -C plv8-${PLV8_VERSION} install 
 #	/usr/bin/install_name_tool -change "/usr/local/lib/libv8.dylib" "$(PREFIX)/lib/libv8.dylib" "$(PREFIX)/lib/postgresql/plv8.so"
 
 
-plv8js/Makefile:
-	/usr/bin/git clone "https://code.google.com/p/plv8js/" -q
+plv8-${PLV8_VERSION}/Makefile: plv8-${PLV8_VERSION}.tar.gz
+	$(TAR) $<
 	touch $@
+	
+plv8-${PLV8_VERSION}.tar.gz:
+	/usr/bin/curl -L10 --silent --show-error -o $@ https://github.com/plv8/plv8/archive/v${PLV8_VERSION}.tar.gz
 
 # Unfortunately, plv8 only builds with outdated v8, but outdated v8 no longer builds with recent clang
 # As a workaround, we include libv8 binary built with older clang in repository
@@ -377,4 +381,4 @@ v8-${V8_VERSION}/Makefile:
 	touch $@
 
 clean-plv8:
-	rm -Rf plv8js v8-${V8_VERSION}
+	rm -Rf plv8js v8-${V8_VERSION} plv8-${PLV8_VERSION}
