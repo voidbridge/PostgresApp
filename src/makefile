@@ -49,6 +49,8 @@ LIBTIFF_VERSION=4.0.8
 ICU_MAJOR_VERSION=58
 ICU_MINOR_VERSION=2
 
+# https://github.com/keithf4/pg_partman
+PARTMAN_VERSION=3.1.0
 
 #path configuration
 PREFIX=/Applications/Postgres.app/Contents/Versions/$(POSTGRES_MAJOR_VERSION)
@@ -71,7 +73,7 @@ CURL=/usr/bin/curl -L10 --silent --show-error --remote-name
 TAR=/usr/bin/tar xzf
 
 all: postgresapp
-clean: clean-postgresql clean-openssl clean-libxml2 clean-libgdal clean-libproj clean-postgis clean-plv8 clean-libjpeg clean-libjasper clean-libgeos clean-libtiff clean-json-c
+clean: clean-postgresql clean-openssl clean-libxml2 clean-libgdal clean-libproj clean-postgis clean-plv8 clean-libjpeg clean-libjasper clean-libgeos clean-libtiff clean-json-c clean-partman
 	rm -Rf "$(PREFIX)"
 check: check-postgresql
 
@@ -96,6 +98,7 @@ $(EXPORT_ARCHIVE_PATH)/RELEASENOTES.txt:
 	/bin/echo "This release contains:" >> $(EXPORT_ARCHIVE_PATH)/RELEASENOTES.txt
 	/bin/echo "- PostgreSQL $(POSTGRES_VERSION)" >> $(EXPORT_ARCHIVE_PATH)/RELEASENOTES.txt
 	/bin/echo "- PostGIS $(POSTGIS_VERSION)" >> $(EXPORT_ARCHIVE_PATH)/RELEASENOTES.txt
+	/bin/echo "- Partman $(PARTMAN_VERSION)" >> $(EXPORT_ARCHIVE_PATH)/RELEASENOTES.txt
 
 $(EXPORT_ARCHIVE_PATH)/Postgres-$(POSTGRESAPP_VERSION).zip: $(EXPORT_ARCHIVE_PATH)/Postgres.app
 	ditto -c -k --sequesterRsrc --keepParent --zlibCompressionLevel 9 --noacl $(EXPORT_ARCHIVE_PATH)/Postgres.app $(EXPORT_ARCHIVE_PATH)/Postgres-$(POSTGRESAPP_VERSION).zip
@@ -104,7 +107,7 @@ $(EXPORT_ARCHIVE_PATH)/Postgres.app: $(EXPORT_ARCHIVE_PATH)/Postgres.xcarchive
 	xcodebuild -exportArchive -archivePath $(EXPORT_ARCHIVE_PATH)/Postgres.xcarchive -exportPath $(EXPORT_ARCHIVE_PATH) -exportOptionsPlist "$(CURDIR)"/exportOptions.plist POSTGRES_VERSION=$(POSTGRES_VERSION) POSTGRES_MAJOR_VERSION=$(POSTGRES_MAJOR_VERSION)
 	touch $@
 
-$(EXPORT_ARCHIVE_PATH)/Postgres.xcarchive: postgresql postgis plv8
+$(EXPORT_ARCHIVE_PATH)/Postgres.xcarchive: postgresql postgis plv8 partman
 	xcodebuild archive -project "$(XCODE_PROJECT_FILE)" -scheme Postgres -archivePath $(EXPORT_ARCHIVE_PATH)/Postgres.xcarchive
 
 
@@ -505,3 +508,22 @@ v8-${V8_VERSION}.tar.gz:
 
 clean-plv8:
 	rm -Rf plv8js v8-${V8_VERSION} plv8-${PLV8_VERSION}
+
+##########################
+###### Partman ###########
+##########################
+
+partman: pg_partman-${PARTMAN_VERSION}/Makefile
+	make -C pg_partman-${PARTMAN_VERSION}
+	make -C pg_partman-${PARTMAN_VERSION} install
+	touch $@
+
+pg_partman-${PARTMAN_VERSION}/Makefile: pg_partman-${PARTMAN_VERSION}.tar.gz
+	$(TAR) $<
+	touch $@
+
+pg_partman-${PARTMAN_VERSION}.tar.gz:
+	/usr/bin/curl -L10 --silent --show-error -o $@ "https://github.com/keithf4/pg_partman/archive/v${PARTMAN_VERSION}.tar.gz"
+
+clean-partman:
+	rm -Rf "partman-${PARTMAN_VERSION}"
