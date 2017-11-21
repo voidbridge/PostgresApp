@@ -42,6 +42,8 @@ JSONC_VERSION=0.11
 # http://www.remotesensing.org/libtiff/
 LIBTIFF_VERSION=4.0.6
 
+# https://github.com/keithf4/pg_partman
+PARTMAN_VERSION=3.1.0
 
 # path configuration
 PREFIX=/Applications/Postgres.app/Contents/Versions/$(POSTGRES_MAJOR_VERSION)
@@ -59,9 +61,9 @@ export CFLAGS CXXFLAGS MACOSX_DEPLOYMENT_TARGET
 CURL=/usr/bin/curl -L10 --silent --show-error --remote-name
 TAR=/usr/bin/tar xzf
 
-all: postgresql postgis
+all: postgresql postgis partman
 #all: postgresql postgis plv8
-clean: clean-postgresql clean-openssl clean-libxml2 clean-libgdal clean-libproj clean-postgis clean-plv8 clean-libjpeg clean-libjasper clean-libgeos clean-libtiff clean-json-c
+clean: clean-postgresql clean-openssl clean-libxml2 clean-libgdal clean-libproj clean-postgis clean-plv8 clean-libjpeg clean-libjasper clean-libgeos clean-libtiff clean-json-c clean-partman
 
 #########################
 ###### PostgreSQL #######
@@ -407,3 +409,22 @@ v8-${V8_VERSION}/Makefile:
 
 clean-plv8:
 	rm -Rf plv8js v8-${V8_VERSION} plv8-${PLV8_VERSION}
+
+##########################
+###### Partman ###########
+##########################
+
+partman: pg_partman-${PARTMAN_VERSION}/Makefile
+	make -C pg_partman-${PARTMAN_VERSION}
+	make -C pg_partman-${PARTMAN_VERSION} install
+	touch $@
+
+pg_partman-${PARTMAN_VERSION}/Makefile: pg_partman-${PARTMAN_VERSION}.tar.gz
+	$(TAR) $<
+	touch $@
+
+pg_partman-${PARTMAN_VERSION}.tar.gz:
+	/usr/bin/curl -L10 --silent --show-error -o $@ "https://github.com/keithf4/pg_partman/archive/v${PARTMAN_VERSION}.tar.gz"
+
+clean-partman:
+	rm -Rf "partman-${PARTMAN_VERSION}"
